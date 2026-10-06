@@ -12,7 +12,7 @@ Main() {
 	echo "Running custom image configuration for DG3399..."
 
 	# Ensure network and basic diagnostic utilities
-	apt-get update
+	apt-get update || true
 	apt-get install -y --no-install-recommends \
 		alsa-utils \
 		bash-completion \
@@ -23,9 +23,9 @@ Main() {
 		pciutils \
 		usbutils \
 		vim \
-		wget
+		wget || true
 
-	apt-get clean
+	apt-get clean || true
 }
 
 Main "$@"

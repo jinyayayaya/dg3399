@@ -103,7 +103,9 @@ jobs:
       - name: Build Armbian Image for DG3399
         run: |
           cd armbian-build
-          sudo bash ./compile.sh build \
+          export COLUMNS=160
+          export TERM=xterm
+          bash ./compile.sh build \
             BOARD=dg3399 \
             BRANCH="${{ env.BRANCH }}" \
             RELEASE="${{ env.RELEASE }}" \

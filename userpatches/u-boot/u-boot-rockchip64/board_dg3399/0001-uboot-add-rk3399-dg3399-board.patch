@@ -193,7 +193,7 @@ index 00000000..435be7cc
 +		compatible = "gpio-leds";
 +		pinctrl-names = "default";
 +		pinctrl-0 = <&user_led0>;
-
++
 +		/* USER_LED */
 +		led-0 {
 +			label = "led:work";
@@ -592,14 +592,19 @@ index 00000000..435be7cc
 +
 +&sdhci {
 +	status = "okay";
++	//max-frequency = <150000000>;
 +	bus-width = <8>;
 +	mmc-hs200-1_8v;
++	//mmc-hs400-1_8v;
++	//mmc-hs400-enhanced-strobe;
++	//keep-power-in-suspend;
 +	non-removable;
 +};
 +
 +&sdmmc {
 +	status = "okay";
 +	clock-frequency = <100000000>;
++	//max-frequency = <150000000>;
 +	bus-width = <4>;
 +	cap-mmc-highspeed;
 +	cap-sd-highspeed;
@@ -608,6 +613,7 @@ index 00000000..435be7cc
 +	pinctrl-names = "default";
 +	pinctrl-0 = <&sdmmc_clk &sdmmc_cmd &sdmmc_bus4 &sdmmc_cd>;
 +	cd-gpios = <&gpio0 RK_PA7 GPIO_ACTIVE_LOW>;
++	//vmmc-supply = <&vcc3v0_sd>;
 +	vqmmc-supply = <&vcc_sdio>;
 +};
 +
@@ -896,3 +902,4 @@ index 00000000..6627f642
 +CONFIG_ERRNO_STR=y
 -- 
 2.34.1
+
