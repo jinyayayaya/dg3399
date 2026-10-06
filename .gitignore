@@ -1,0 +1,16 @@
+# Output & build artifacts
+output/
+build/
+dist/
+*.img
+*.img.xz
+*.img.gz
+*.deb
+*.iso
+*.tar.xz
+*.tar.gz
+
+# Temporary and tool files
+*.tmp
+*.log
+.cache/
