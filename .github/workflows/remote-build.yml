@@ -1,0 +1,138 @@
+name: Build Armbian for DG3399
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Debian / Ubuntu Release'
+        required: true
+        type: choice
+        options:
+          - bookworm
+          - trixie
+          - noble
+        default: bookworm
+
+      branch:
+        description: 'Kernel Branch'
+        required: true
+        type: choice
+        options:
+          - current
+          - edge
+        default: current
+
+      system:
+        description: 'System Type'
+        required: true
+        type: choice
+        options:
+          - minimal
+          - server
+          - desktop
+        default: minimal
+
+      desktop:
+        description: 'Desktop Environment (if system=desktop)'
+        required: false
+        type: choice
+        options:
+          - xfce
+          - gnome
+        default: xfce
+
+      armbian_version:
+        description: 'Armbian Build Branch / Tag'
+        required: true
+        type: string
+        default: 'v24.11'
+
+  push:
+    branches:
+      - 'ci/remote-build'
+      - 'build-temp'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Free Disk Space
+        run: |
+          echo "Disk space before cleanup:"
+          df -hT
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          sudo rm -rf /opt/hostedtoolcache/CodeQL
+          sudo apt-get clean
+          echo "Disk space after cleanup:"
+          df -hT
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Checkout Armbian Build Framework
+        run: |
+          BUILD_TAG="${{ inputs.armbian_version || 'v24.11' }}"
+          echo "Cloning Armbian build framework (branch/tag: ${BUILD_TAG})..."
+          git clone -q --single-branch --depth=1 --branch="${BUILD_TAG}" https://github.com/armbian/build.git armbian-build
+
+      - name: Inject Userpatches
+        run: |
+          cp -rvf userpatches armbian-build/
+
+      - name: Prepare Build Parameters
+        run: |
+          RELEASE="${{ inputs.release || 'bookworm' }}"
+          BRANCH="${{ inputs.branch || 'current' }}"
+          SYSTEM="${{ inputs.system || 'minimal' }}"
+          DESKTOP="${{ inputs.desktop || 'xfce' }}"
+
+          if [ "${SYSTEM}" = "minimal" ]; then
+            echo "BUILD_ARGS=BUILD_DESKTOP=no BUILD_MINIMAL=yes" >> $GITHUB_ENV
+          elif [ "${SYSTEM}" = "server" ]; then
+            echo "BUILD_ARGS=BUILD_DESKTOP=no BUILD_MINIMAL=no" >> $GITHUB_ENV
+          elif [ "${SYSTEM}" = "desktop" ]; then
+            echo "BUILD_ARGS=BUILD_DESKTOP=yes BUILD_MINIMAL=no DESKTOP_ENVIRONMENT=${DESKTOP} DESKTOP_TIER=minimal" >> $GITHUB_ENV
+          fi
+
+          echo "RELEASE=${RELEASE}" >> $GITHUB_ENV
+          echo "BRANCH=${BRANCH}" >> $GITHUB_ENV
+          echo "SYSTEM=${SYSTEM}" >> $GITHUB_ENV
+
+      - name: Build Armbian Image for DG3399
+        run: |
+          cd armbian-build
+          sudo bash ./compile.sh build \
+            BOARD=dg3399 \
+            BRANCH="${{ env.BRANCH }}" \
+            RELEASE="${{ env.RELEASE }}" \
+            ${{ env.BUILD_ARGS }} \
+            KERNEL_CONFIGURE=no \
+            COMPRESS_OUTPUTIMAGE=sha,img,xz \
+            BSPFREEZE=yes
+
+      - name: Inspect Output Images
+        run: |
+          ls -lah armbian-build/output/images/ || true
+
+      - name: Upload Image Artifacts
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: Armbian-DG3399-${{ env.RELEASE }}-${{ env.BRANCH }}-${{ env.SYSTEM }}
+          path: |
+            armbian-build/output/images/*.img.xz
+            armbian-build/output/images/*.sha
+          retention-days: 7
+
+      - name: Create GitHub Release
+        if: success() && github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="DG3399-${{ env.RELEASE }}-${{ env.BRANCH }}-${{ env.SYSTEM }}-$(date +'%Y%m%d%H%M')"
+          echo "Creating Release: ${TAG_NAME}"
+          gh release create "${TAG_NAME}" armbian-build/output/images/*.img.xz armbian-build/output/images/*.sha \
+            --title "Armbian DG3399 (${{ env.RELEASE }} ${{ env.BRANCH }} ${{ env.SYSTEM }})" \
+            --notes "Automated Armbian build for DG3399 (RK3399) with full mainline DTS (RT5651 audio, 4G, WK2xxx, Gigabit Ethernet, AP6356S WiFi/BT)." || echo "Release creation skipped or already exists."
