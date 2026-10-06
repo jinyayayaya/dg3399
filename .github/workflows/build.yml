@@ -71,6 +71,18 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      - name: Set up QEMU and Binfmt Emulation
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: all
+
+      - name: Install Host QEMU and Binfmt Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+          sudo systemctl restart systemd-binfmt.service || true
+          ls -la /proc/sys/fs/binfmt_misc/ || true
+
       - name: Checkout Armbian Build Framework
         run: |
           BUILD_TAG="${{ inputs.armbian_version || 'v24.11' }}"
@@ -99,6 +111,14 @@ jobs:
           echo "RELEASE=${RELEASE}" >> $GITHUB_ENV
           echo "BRANCH=${BRANCH}" >> $GITHUB_ENV
           echo "SYSTEM=${SYSTEM}" >> $GITHUB_ENV
+
+      - name: Cache Armbian Packages
+        uses: actions/cache@v4
+        with:
+          path: armbian-build/output/packages-hashed
+          key: armbian-packages-${{ env.RELEASE }}-${{ env.BRANCH }}-${{ hashFiles('userpatches/**') }}
+          restore-keys: |
+            armbian-packages-${{ env.RELEASE }}-${{ env.BRANCH }}-
 
       - name: Build Armbian Image for DG3399
         run: |
