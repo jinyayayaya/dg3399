@@ -103,6 +103,8 @@ jobs:
       - name: Build Armbian Image for DG3399
         run: |
           cd armbian-build
+          # Defensive fix for patching.py if COLUMNS is empty
+          sed -i 's/int(os.environ.get("COLUMNS", 160))/int(os.environ.get("COLUMNS") or 160)/g' lib/tools/patching.py || true
           export COLUMNS=160
           export TERM=xterm
           bash ./compile.sh build \
@@ -112,7 +114,8 @@ jobs:
             ${{ env.BUILD_ARGS }} \
             KERNEL_CONFIGURE=no \
             COMPRESS_OUTPUTIMAGE=sha,img,xz \
-            BSPFREEZE=yes
+            BSPFREEZE=yes \
+            DOCKER_ARMBIAN_BASE_IMAGE="ubuntu:noble"
 
       - name: Inspect Output Images
         run: |
