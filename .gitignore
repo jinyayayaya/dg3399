@@ -5,6 +5,8 @@ dist/
 *.img
 *.img.xz
 *.img.gz
+*.sha
+*.sha256
 *.deb
 *.iso
 *.tar.xz
