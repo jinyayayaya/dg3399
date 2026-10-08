@@ -1,0 +1,151 @@
+#!/usr/bin/env bash
+#
+# install-to-emmc: Non-interactive script to migrate running Armbian from SD to onboard eMMC.
+#
+set -euo pipefail
+
+echo "=========================================================="
+echo " Starting DG3399 Armbian Installation to eMMC (/dev/mmcblk2)"
+echo "=========================================================="
+
+if [[ $EUID -ne 0 ]]; then
+    echo "[-] Error: This script must be run as root (e.g. sudo install-to-emmc)." >&2
+    exit 1
+fi
+
+EMMC_DEV="/dev/mmcblk2"
+EMMC_PART="/dev/mmcblk2p1"
+UBOOT_DIR="/usr/lib/linux-u-boot-current-dg3399"
+MOUNT_POINT="/mnt/emmc_target"
+
+if [[ ! -b "$EMMC_DEV" ]]; then
+    echo "[-] Error: eMMC block device $EMMC_DEV not found!" >&2
+    exit 1
+fi
+
+ROOT_DEV="/dev/$(lsblk -ndo pkname "$(findmnt -n -o SOURCE /)")"
+if [[ "$ROOT_DEV" == "$EMMC_DEV" ]]; then
+    echo "[-] Error: Current running root is already on $EMMC_DEV!" >&2
+    exit 1
+fi
+
+echo "[+] Current boot source: $ROOT_DEV (SD card)"
+echo "[+] Target eMMC device:  $EMMC_DEV"
+
+# Verify U-Boot package
+for f in idbloader.bin uboot.img trust.bin; do
+    if [[ ! -f "$UBOOT_DIR/$f" ]]; then
+        echo "[-] Error: Required U-Boot binary $UBOOT_DIR/$f not found!" >&2
+        exit 1
+    fi
+done
+echo "[+] U-Boot binaries verified in $UBOOT_DIR"
+
+# Unmount existing eMMC partitions if any
+echo "[+] Unmounting any active mounts on $EMMC_DEV..."
+for part in $(ls "${EMMC_DEV}"* 2>/dev/null); do
+    if mount | grep -q "$part"; then
+        echo "    Unmounting $part"
+        umount -f "$part" || true
+    fi
+done
+
+# Partition eMMC (MBR starting at sector 32768, 16MB offset for Rockchip bootloader)
+echo "[+] Partitioning $EMMC_DEV..."
+dd bs=1 seek=446 count=64 if=/dev/zero of="$EMMC_DEV" conv=fsync status=none
+
+TOTAL_SECTORS=$(blockdev --getsz "$EMMC_DEV")
+LAST_SECTOR=$(( 32768 * (TOTAL_SECTORS * 99 / 3276800) - 1 ))
+echo "    Total sectors: $TOTAL_SECTORS"
+echo "    Partition 1: sector 32768 to $LAST_SECTOR"
+
+parted -s "$EMMC_DEV" -- mklabel msdos
+parted -s "$EMMC_DEV" -- mkpart primary ext4 32768s "${LAST_SECTOR}s"
+partprobe "$EMMC_DEV"
+udevadm settle
+
+if [[ ! -b "$EMMC_PART" ]]; then
+    echo "[-] Error: $EMMC_PART was not created successfully!" >&2
+    exit 1
+fi
+
+# Format partition
+echo "[+] Formatting $EMMC_PART as ext4..."
+mkfs.ext4 -F -q -L "rootfs" "$EMMC_PART"
+udevadm settle
+
+NEW_UUID=$(blkid -s UUID -o value "$EMMC_PART")
+echo "[+] Target eMMC Root UUID: $NEW_UUID"
+
+# Mount target
+echo "[+] Mounting $EMMC_PART to $MOUNT_POINT..."
+mkdir -p "$MOUNT_POINT"
+mount "$EMMC_PART" "$MOUNT_POINT"
+
+# Synchronize rootfs
+echo "[+] Synchronizing root filesystem..."
+rsync -aHAXx --delete \
+    --exclude='/boot/*' \
+    --exclude='/dev/*' \
+    --exclude='/proc/*' \
+    --exclude='/sys/*' \
+    --exclude='/media/*' \
+    --exclude='/mnt/*' \
+    --exclude='/run/*' \
+    --exclude='/tmp/*' \
+    --exclude='/ddbr/*' \
+    --exclude='/var/log/*' \
+    / "$MOUNT_POINT/"
+
+echo "[+] Copying /boot contents..."
+rsync -aHAX /boot/ "$MOUNT_POINT/boot/"
+
+echo "[+] Initializing /var/log..."
+if [[ -d /var/log.hdd ]]; then
+    rsync -aHAX /var/log.hdd/ "$MOUNT_POINT/var/log/"
+fi
+
+echo "[+] Creating runtime mount point directories..."
+mkdir -p "$MOUNT_POINT"/{dev,proc,sys,media,mnt,run,tmp}
+chmod 1777 "$MOUNT_POINT/tmp"
+mkdir -p "$MOUNT_POINT/var/log/journal"
+
+# Update configuration
+echo "[+] Updating boot configuration (armbianEnv.txt & /etc/fstab)..."
+if [[ -f "$MOUNT_POINT/boot/armbianEnv.txt" ]]; then
+    sed -i "s/^rootdev=.*/rootdev=UUID=${NEW_UUID}/" "$MOUNT_POINT/boot/armbianEnv.txt"
+    if ! grep -q "^rootfstype=" "$MOUNT_POINT/boot/armbianEnv.txt"; then
+        echo "rootfstype=ext4" >> "$MOUNT_POINT/boot/armbianEnv.txt"
+    fi
+else
+    echo "[-] Error: armbianEnv.txt not found on target!" >&2
+    exit 1
+fi
+
+cat <<FSTAB > "$MOUNT_POINT/etc/fstab"
+# <file system>					<mount point>	<type>	<options>							<dump>	<pass>
+UUID=${NEW_UUID}	/		ext4	defaults,noatime,commit=120,errors=remount-ro	0	1
+tmpfs						/tmp		tmpfs	defaults,nosuid							0	0
+FSTAB
+
+if ! grep -q "INSTALLED=true" "$MOUNT_POINT/etc/armbian-image-release" 2>/dev/null; then
+    echo "INSTALLED=true" >> "$MOUNT_POINT/etc/armbian-image-release"
+fi
+
+# Sync & unmount
+echo "[+] Syncing filesystem to disk..."
+sync
+umount "$MOUNT_POINT"
+rmdir "$MOUNT_POINT"
+
+# Flash U-Boot
+echo "[+] Flashing Rockchip U-Boot to $EMMC_DEV..."
+dd if="$UBOOT_DIR/idbloader.bin" of="$EMMC_DEV" seek=64 conv=notrunc status=none
+dd if="$UBOOT_DIR/uboot.img" of="$EMMC_DEV" seek=16384 conv=notrunc status=none
+dd if="$UBOOT_DIR/trust.bin" of="$EMMC_DEV" seek=24576 conv=notrunc status=none
+sync
+
+echo "=========================================================="
+echo " All done! The system has been successfully written to eMMC."
+echo " Power off the board, remove the SD card, and power on."
+echo "=========================================================="

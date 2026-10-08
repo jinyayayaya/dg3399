@@ -26,6 +26,9 @@ Main() {
 		wget || true
 
 	apt-get clean || true
+
+	# Ensure custom helper scripts have execute permissions
+	chmod +x /usr/local/bin/install-to-emmc 2>/dev/null || true
 }
 
 Main "$@"
