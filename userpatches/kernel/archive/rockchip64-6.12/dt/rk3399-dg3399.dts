@@ -207,29 +207,21 @@
 		reset-gpios = <&gpio0 RK_PB2 GPIO_ACTIVE_LOW>;
 	};
 
-	typec_extcon_bridge: typec-extcon {
-		compatible = "linux,typec-extcon-bridge";
-		usb-role-switch;
-		orientation-switch;
-		mode-switch;
-		svid = /bits/ 16 <0xff01>;
-	};
-
 	/* Realtek RT5651 Audio */
 	rt5651_sound: rt5651-sound {
 		compatible = "simple-audio-card";
 		simple-audio-card,name = "realtek,rt5651-codec";
 		simple-audio-card,format = "i2s";
 		simple-audio-card,mclk-fs = <256>;
+		simple-audio-card,hp-det-gpio = <&gpio4 RK_PD4 GPIO_ACTIVE_LOW>;
 		simple-audio-card,widgets =
 			"Microphone", "Mic Jack",
-			"Headphone", "Headphone Jack",
+			"Headphone", "Headphones",
 			"Speaker", "Internal Speakers";
 		simple-audio-card,routing =
-			"Mic Jack", "MICBIAS1",
 			"IN1P", "Mic Jack",
-			"Headphone Jack", "HPOL",
-			"Headphone Jack", "HPOR",
+			"Headphones", "HPOL",
+			"Headphones", "HPOR",
 			"Internal Speakers", "LOUTL",
 			"Internal Speakers", "LOUTR";
 		simple-audio-card,cpu {
@@ -572,7 +564,6 @@
 		clock-names = "mclk";
 		pinctrl-names = "default";
 		pinctrl-0 = <&spk_con_pin &headset_det_pin>;
-		hp-det-gpios = <&gpio4 RK_PD4 GPIO_ACTIVE_LOW>;
 		spk-con-gpio = <&gpio4 RK_PC5 GPIO_ACTIVE_HIGH>;
 		#sound-dai-cells = <0>;
 	};
@@ -598,9 +589,6 @@
 		pinctrl-0 = <&usbc0_int>;
 		vbus-supply = <&vbus_typec>;
 
-		usb-role-switch = <&typec_extcon_bridge>;
-		extcon = <&typec_extcon_bridge>;
-
 		connector {
 			compatible = "usb-c-connector";
 			label = "USB-C";
@@ -610,16 +598,6 @@
 			source-pdos = <PDO_FIXED(5000, 1200, PDO_FIXED_USB_COMM)>;
 			sink-pdos = <PDO_FIXED(5000, 500, PDO_FIXED_USB_COMM)>;
 			op-sink-microwatt = <5000000>;
-
-			mode-switch = <&typec_extcon_bridge>;
-			orientation-switch = <&typec_extcon_bridge>;
-
-			altmodes {
-				dp {
-					svid = /bits/ 16 <0xff01>;
-					vdo = <0x1c46>;
-				};
-			};
 
 			ports {
 				#address-cells = <1>;
@@ -635,18 +613,9 @@
 
 				port@1 {
 					reg = <1>;
-
 					usb_con_ss: endpoint {
 						remote-endpoint =
 							<&tcphy0_typec_ss>;
-					};
-				};
-
-				port@2 {
-					reg = <2>;
-					usb_con_dp: endpoint {
-						remote-endpoint =
-							<&tcphy0_typec_dp>;
 					};
 				};
 			};
@@ -666,8 +635,10 @@
 };
 
 &i2s0 {
-	rockchip,playback-channels = <8>;
-	rockchip,capture-channels = <8>;
+	pinctrl-0 = <&i2s0_2ch_bus>;
+	pinctrl-1 = <&i2s0_2ch_bus_bclk_off>;
+	rockchip,playback-channels = <2>;
+	rockchip,capture-channels = <2>;
 	status = "okay";
 };
 
@@ -794,22 +765,11 @@
 };
 
 &cdn_dp {
-	status = "okay";
-	extcon = <&typec_extcon_bridge>;
-	phys = <&tcphy0_dp>;
+	status = "disabled";
 };
 
 &tcphy0 {
 	status = "okay";
-	extcon = <&typec_extcon_bridge>;
-};
-
-&tcphy0_dp {
-	port {
-		tcphy0_typec_dp: endpoint {
-			remote-endpoint = <&usb_con_dp>;
-		};
-	};
 };
 
 &tcphy0_usb3 {
@@ -826,22 +786,20 @@
 
 &u2phy0 {
 	status = "okay";
-	extcon = <&typec_extcon_bridge>;
-	extcon,ignore-usb;
 
 	u2phy0_otg: otg-port {
 		status = "okay";
-
-		port {
-			u2phy0_typec_hs: endpoint {
-				remote-endpoint = <&usb_con_hs>;
-			};
-		};
 	};
 
 	u2phy0_host: host-port {
 		status = "okay";
 		phy-supply = <&vcc5v0_host>;
+	};
+
+	port {
+		u2phy0_typec_hs: endpoint {
+			remote-endpoint = <&usb_con_hs>;
+		};
 	};
 };
 
@@ -881,7 +839,6 @@
 &usbdrd_dwc3_0 {
 	status = "okay";
 	dr_mode = "otg";
-	extcon = <&typec_extcon_bridge>;
 	snps,usb3-phy-reset-quirk;
 };
 
@@ -930,7 +887,7 @@
 
 &pinctrl {
 	pinctrl-names = "default";
-	pinctrl-0 = <&host_hub_vcc &pwr_hold_pin>;
+	pinctrl-0 = <&pwr_hold_pin>;
 
 	pmic {
 		pmic_int_l: pmic-int-l {
@@ -950,12 +907,6 @@
 	};
 
 	host-hub-vcc {
-		host_hub_vcc: host-hub-vcc {
-			rockchip,pins =
-				<4 RK_PD0 RK_FUNC_GPIO &pcfg_output_high>,	/* USB3.0 HUB EN */
-				<0 RK_PB3 RK_FUNC_GPIO &pcfg_output_high>;	/* USB3.0 5V */
-		};
-
 		hub_en_pin: hub-en-pin {
 			rockchip,pins =
 				<4 RK_PD0 RK_FUNC_GPIO &pcfg_pull_none>;
